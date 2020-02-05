@@ -11,6 +11,10 @@ See the License for the specific language governing permissions and limitations 
 package bigip
 
 import (
+	"encoding/json"
+	"fmt"
+	k8log "github.com/F5Networks/k8s-bigip-ctlr/pkg/vlogger"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -231,6 +235,9 @@ const (
 	uriVlanInterfaces = "interfaces"
 	uriRoute          = "route"
 	uriRouteDomain    = "route-domain"
+	uriArp            = "arp"
+	uriFdb            = "fdb"
+	uriRecords        = "records"
 )
 
 // formatResourceID takes the resource name to
@@ -622,4 +629,404 @@ func (b *BigIP) DeleteVxlan(name string) error {
 // ModifyVxlan allows you to change any attribute of a vxlan profile.
 func (b *BigIP) ModifyVxlan(name string, config *Vxlan) error {
 	return b.put(config, uriNet, uriTunnels, uriVxlan, name)
+}
+
+// Defines an ARP entry.
+type ArpType struct {
+	// IpAddress corresponds to the JSON schema field "ipAddress".
+	IpAddress string `json:"ipAddress"`
+
+	// MacAddress corresponds to the JSON schema field "macAddress".
+	MacAddress string `json:"macAddress"`
+
+	// Partition corresponds to the JSON schema field "partition".
+	Partition string `json:"partition"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ArpType) UnmarshalJSON(b []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["ipAddress"]; !ok || v == nil {
+		return fmt.Errorf("field ipAddress: required")
+	}
+	if v, ok := raw["macAddress"]; !ok || v == nil {
+		return fmt.Errorf("field macAddress: required")
+	}
+	if v, ok := raw["name"]; !ok || v == nil {
+		return fmt.Errorf("field name: required")
+	}
+	type Plain ArpType
+	var plain Plain
+	if err := json.Unmarshal(b, &plain); err != nil {
+		return err
+	}
+	*j = ArpType(plain)
+	return nil
+}
+
+// ArpTypes contains a list of all static arps on the BIG-IP system.
+type ArpTypes struct {
+	ArpTypes []ArpType `json:"items"`
+}
+
+// RecordTypes contains a list of all fdb entries on the BIG-IP system.
+type RecordTypes struct {
+	RecordTypes []RecordType `json:"items"`
+}
+
+// Defines an FDB tunnel.
+type FdbTunnelType struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Records corresponds to the JSON schema field "records".
+	//Records interface{} `json:"records"`
+	Records []RecordType `json:"records"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FdbTunnelType) UnmarshalJSON(b []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["name"]; !ok || v == nil {
+		return fmt.Errorf("field name: required")
+	}
+	if v, ok := raw["records"]; !ok || v == nil {
+		return fmt.Errorf("field records: required")
+	}
+	type Plain FdbTunnelType
+	var plain Plain
+	if err := json.Unmarshal(b, &plain); err != nil {
+		return err
+	}
+	*j = FdbTunnelType(plain)
+	return nil
+}
+
+type RecordType struct {
+	// Endpoint corresponds to the JSON schema field "endpoint".
+	Endpoint string `json:"endpoint"`
+
+	// Name of the record (MAC address).
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RecordType) UnmarshalJSON(b []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["endpoint"]; !ok || v == nil {
+		return fmt.Errorf("field endpoint: required")
+	}
+	if v, ok := raw["name"]; !ok || v == nil {
+		return fmt.Errorf("field name: required")
+	}
+	type Plain RecordType
+	var plain Plain
+	if err := json.Unmarshal(b, &plain); err != nil {
+		return err
+	}
+	*j = RecordType(plain)
+	return nil
+}
+
+// The CCCL "Cecil" library allows clients to define services that describe
+// NET resources on a managed partition of the BIG-IP.  The managed resources
+// are defined in this schema definitions section.
+// The structure of the service definition is a collection of lists of
+// supported resources.  Initially this is ARPs and FDB tunnel records.
+// Where appropriate some basic constraints are defined by the schema; however,
+// not all actual constraints can be enforced by the schema.  It is the
+// responsibility of the client application to ensure that all dependencies
+// among the specified resources are met; otherwise, the service will be deployed
+// in a degraded state.
+//
+type CcclNet struct {
+	// List of all ARP resources that should exist
+	Arps      []ArpType `json:"arps,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	Partition string    `json:"partition,omitempty"`
+	// List of all FDB tunnel resources that should exist
+	FdbTunnels []FdbTunnelType `json:"fdbTunnels,omitempty"`
+
+	// List of user-created FDB tunnel resources to be updated. These are expected to
+	// be administratively created beforehand. CCCL will perform updates only on these
+	// tunnels, no deletion or creation.
+	//
+	UserFdbTunnels []FdbTunnelType `json:"userFdbTunnels,omitempty"`
+}
+
+func (cn *CcclNet) UnmarshalJSON(b []byte) error {
+	var raw map[string]interface{}
+	type cccl CcclNet
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["arps"]; !ok || v == nil {
+		return fmt.Errorf("field arps: required")
+	}
+	if v, ok := raw["partition"]; !ok || v == nil {
+		return fmt.Errorf("field partition: required")
+	}
+	if v, ok := raw["fdbTunnels"]; !ok || v == nil {
+		return fmt.Errorf("field fdbTunnels: required")
+	}
+
+	if err := json.Unmarshal(b, (*cccl)(cn)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// CreateARP adds a new Static ARP Entry to BIG-IP system.
+// This func expects ArpType struct as input
+// returns error if it fails to push entry,
+// return nil in successful post
+//func (b *BigIP) CreateARP(config *ArpType) error
+
+func (b *BigIP) CreateARP(config *ArpType) error {
+	//config := &ArpType{
+	//	Name:       name,
+	//	IpAddress:  ipaddress,
+	//	MacAddress: macaddress,
+	//}
+
+	return b.post(config, uriNet, uriArp)
+}
+
+// DeleteArp removes a Static ARP entries created.
+func (b *BigIP) DeleteArp(name string) error {
+	return b.delete(uriNet, uriArp, name)
+}
+
+// ModifyARP allows you to change any attribute of a ARP. Fields that
+// can be modified are referenced in the *ArpType struct.
+func (b *BigIP) ModifyARP(name string, config *ArpType) error {
+	return b.put(config, uriNet, uriArp, name)
+}
+
+// GetArps returns a list of StaticARP on BIGIP.
+func (b *BigIP) GetArps() (*ArpTypes, error) {
+	var va ArpTypes
+	err, _ := b.getForEntity(&va, uriNet, uriArp)
+	if err != nil {
+		return nil, err
+	}
+	return &va, nil
+}
+
+// GetFdb returns a list of Fdb entries on BIGIP.
+func (b *BigIP) GetFdb(TunnelName string) (*RecordTypes, error) {
+	var va RecordTypes
+	err, _ := b.getForEntity(&va, uriNet, uriFdb, uriTunnel, TunnelName, uriRecords)
+	if err != nil {
+		return nil, err
+	}
+	return &va, nil
+}
+
+//The F5 Common Controller Core Library (CCCL) is an orchestration package
+//that provides a declarative API for defining BIG-IP LTM and NET services
+//in diverse environments (e.g. Marathon, Kubernetes, OpenStack). The
+//API will allow a user to create proxy services by specifying the:
+//virtual servers, pools, L7 policy and rules, monitors, arps, or fdbTunnels
+//as a service description object.  Each instance of the CCCL is initialized
+//with namespace qualifiers to allow it to uniquely identify the resources
+//under its control.
+
+func (netobject *CcclNet) F5CloudserviceManager() error {
+	ip := os.Getenv("BIGIP_HOST")
+	admin := os.Getenv("BIGIP_USER")
+	passwd := os.Getenv("BIGIP_PASSWORD")
+	//f5 := bigip.NewSession(ip, admin, passwd, nil)
+	//NewTokenSession(host)
+	tknSession, err := NewTokenSession(ip, "443", admin, passwd, "tmos", nil)
+	if err != nil {
+		k8log.Errorf("Connection to BIGIP failed with:%v", err)
+		return err
+	}
+	k8log.Debugf("BIGIP Handle:%+v", tknSession)
+	err = netobject.CreateArpsRecords(tknSession)
+	if err != nil {
+		k8log.Errorf("Arp Creation failed with :%v", err)
+		return err
+	}
+	err = netobject.CreateFdbRecords(tknSession)
+	if err != nil {
+		k8log.Errorf("Fdb Creation failed with :%v", err)
+		return err
+	}
+	return nil
+}
+
+//CreateNetObject function used to convert NET json string
+//to object, this object contains List of ARP/FDB entries
+//which are used to configure BIGIP
+
+func CreateNetObject(jsn string) (*CcclNet, error) {
+	cn := &CcclNet{}
+	err := cn.UnmarshalJSON([]byte(jsn))
+	if err != nil {
+		k8log.Errorf("UnmarshalJSON Object failed with :%v", err)
+	}
+	return cn, nil
+}
+
+type arpKeyType struct {
+	Name      string `json:"name"`
+	IpAddress string `json:"ipAddress"`
+	Partition string `json:"partition"`
+}
+type arpValueType struct {
+	MacAddress string `json:"macAddress"`
+}
+type fdbKeyType struct {
+	Name string `json:"name"`
+}
+type fdbValueType struct {
+	Endpoint string `json:"endpoint"`
+}
+
+//CreateArpsRecords function configures arp entries
+//in bigip after validating against existing entries,
+//If the entry present and there is change it will modify,
+//If no change it will not perform anything
+//for complete new entry it configure new entry on bigip
+//and will delete unmatched entries
+
+func (cn *CcclNet) CreateArpsRecords(b *BigIP) error {
+	oldArpMap := make(map[arpKeyType]arpValueType)
+	newArpMap := make(map[arpKeyType]arpValueType)
+	existarps, err := b.GetArps()
+	if err != nil {
+		k8log.Errorf("Fetching ARP entries from BIGIP failed with:%v", err)
+		return err
+	}
+	k8log.Debugf("New Arp entries to be pushed into BIGIP: %+v", cn.Arps)
+	k8log.Debugf("Arp entries Exist on BIGIP: %+v", existarps)
+	//log.Debugf("Type of :%v\n", reflect.Indirect(reflect.ValueOf(existarps)).Type())
+
+	for _, v := range existarps.ArpTypes {
+		oldArpMap[arpKeyType{v.Name, v.IpAddress, v.Partition}] = arpValueType{v.MacAddress}
+	}
+	for _, v := range cn.Arps {
+		newArpMap[arpKeyType{v.Name, v.IpAddress, cn.Partition}] = arpValueType{v.MacAddress}
+	}
+	for key, val := range newArpMap {
+		if _, ok := oldArpMap[key]; ok {
+			if val != oldArpMap[key] {
+				k := &ArpType{key.IpAddress, val.MacAddress, key.Partition, key.Name}
+				//key.Name = "~" + key.Partition + "~" + key.Name
+				k8log.Debugf("Modifying struct :%v", k)
+				err := b.ModifyARP(key.Name, k)
+				if err != nil {
+					k8log.Errorf("Modifying Entry failed with :%v", err)
+					return err
+				}
+			}
+			//log.Info("Matched Entry:")
+			delete(oldArpMap, key)
+		} else {
+			k := &ArpType{key.IpAddress, val.MacAddress, key.Partition, key.Name}
+			k8log.Debugf("New ARP Entry to be Created: %v", k)
+			err := b.CreateARP(k)
+			if err != nil {
+				k8log.Errorf("Posting Entry failed with :%v", err)
+				return err
+			}
+		}
+	}
+	for key, _ := range oldArpMap {
+		key.Name = "~" + key.Partition + "~" + key.Name
+		k8log.Debugf("OldEntry to be deleted %v", key.Name)
+		err := b.DeleteArp(key.Name)
+		if err != nil {
+			k8log.Errorf("Deleting Entry failed with :%v", err)
+			return err
+		}
+	}
+	return nil
+}
+
+// GetFdb returns a list of Fdb entries on BIGIP.
+func (fd *RecordType) GetFdbTunnel(b *BigIP) (*RecordTypes, error) {
+	var va RecordTypes
+	TunnelName := fd.Name
+	err, _ := b.getForEntity(&va, uriNet, uriFdb, uriTunnel, TunnelName, uriRecords)
+	if err != nil {
+		return nil, err
+	}
+	return &va, nil
+}
+
+//CreateFdbRecords function configures fdb entries
+//in bigip after validation against existing entries,
+//If the entry present in bigip and if there is change it will modify,
+//If no change it will not perform anything
+//for complete new entry it configure new entry on bigip
+//and will delete unmatched entries
+func (cn *CcclNet) CreateFdbRecords(b *BigIP) error {
+	oldFdbMap := make(map[fdbKeyType]fdbValueType)
+	newFdbMap := make(map[fdbKeyType]fdbValueType)
+	var tunnelName string
+
+	for _, v := range cn.FdbTunnels {
+		tunnelName = v.Name
+		existfdb, err := b.GetFdb(tunnelName)
+		//existfdb, err := dataFdb.GetFdbTunnel(v.Name)
+		if err != nil {
+			k8log.Errorf("Fetching FDB entries from BIGIP failed with:%v", err)
+			return err
+		}
+		k8log.Debugf("Fdb entries Available on BIGIP: %+v", existfdb)
+		for _, v := range existfdb.RecordTypes {
+			oldFdbMap[fdbKeyType{v.Name}] = fdbValueType{v.Endpoint}
+		}
+		for _, vv := range v.Records {
+			newFdbMap[fdbKeyType{vv.Name}] = fdbValueType{vv.Endpoint}
+		}
+	}
+	for key, val := range newFdbMap {
+		if _, ok := oldFdbMap[key]; ok {
+			if val != oldFdbMap[key] {
+				k := &RecordType{val.Endpoint, key.Name}
+				k8log.Debugf("Modifying struct :%v", k)
+				err := b.patch(k, uriNet, uriFdb, uriTunnel, tunnelName, uriRecords, k.Name)
+				if err != nil {
+					k8log.Errorf("Modifying Entry failed with :%v", err)
+					return err
+				}
+			}
+			//log.Debug("Matched struct ")
+			delete(oldFdbMap, key)
+		} else {
+			k := &RecordType{val.Endpoint, key.Name}
+			k8log.Debugf("New fdbEntry struct :%v", k)
+			err := b.post(k, uriNet, uriFdb, uriTunnel, tunnelName, uriRecords)
+			if err != nil {
+				k8log.Errorf("Posting Entry failed with :%v", err)
+				return err
+			}
+		}
+	}
+	for key, _ := range oldFdbMap {
+		k8log.Debugf("oldFdb Entry to be deleted %v", key.Name)
+		err := b.delete(uriNet, uriFdb, uriTunnel, tunnelName, uriRecords, key.Name)
+		if err != nil {
+			k8log.Errorf("Deleting Entry failed with :%v", err)
+			return err
+		}
+	}
+	return nil
 }
