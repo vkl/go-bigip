@@ -1,0 +1,36 @@
+{
+    "name": "test",
+    "partition": "ravinder",
+    "arps": [
+        {
+            "name": "test-arp33",
+            "ipAddress": "10.45.62.50",
+            "macAddress": "12:ab:34:cd:59:ff"
+        },
+        {
+            "name": "test-arp5",
+            "ipAddress": "10.45.62.48",
+            "macAddress": "12:ab:34:cd:57:ee"
+        },
+        {
+          "name": "test-arp6",
+          "ipAddress": "10.45.62.54",
+          "macAddress": "12:ab:34:cd:56:ed"
+        }
+        ],
+    "fdbTunnels": [
+       {
+            "name": "~ravinder~test-tunnel2",
+            "records": [
+                    {
+                         "name": "12:ab:34:cd:56:ff",
+                         "endpoint": "1.2.5.7"
+                    },
+                    {
+                         "name": "98:ab:76:cd:54:ef",
+                         "endpoint": "10.2.3.4"
+                    }
+             ]
+        }
+    ]
+}
