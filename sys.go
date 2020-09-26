@@ -197,6 +197,7 @@ type Volume struct {
 	Product   string `json:"product,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Version   string `json:"version,omitempty"`
+	Active    bool   `json:"active,omitempty"`
 	Media     []struct {
 		Defaultbootlocation bool   `json:"defaultBootLocation,omitempty"`
 		Name                string `json:"name,omitempty"`
@@ -212,7 +213,6 @@ type Images struct {
 type Image struct {
 	Name         string `json:"name,omitempty"`
 	Fullpath     string `json:"fullPath,omitempty"`
-	Basebuild    string `json:"basebuild,omitempty"`
 	Build        string `json:"build,omitempty"`
 	BuildDate    string `json:"buildDate,omitempty"`
 	Checksum     string `json:"checksum,omitempty"`
@@ -229,8 +229,9 @@ type Hotfixes struct {
 
 type Hotfix struct {
 	Name         string `json:"name,omitempty"`
+	Id           string `json:"id,omitempty"`
+	Title        string `json:"title,omitempty"`
 	Fullpath     string `json:"fullPath,omitempty"`
-	Basebuild    string `json:"basebuild,omitempty"`
 	Build        string `json:"build,omitempty"`
 	BuildDate    string `json:"buildDate,omitempty"`
 	Checksum     string `json:"checksum,omitempty"`
